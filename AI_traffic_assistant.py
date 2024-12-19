@@ -410,6 +410,8 @@ class AiTraffic(Util):
                     result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sys_prompt},
                                                   {'role': 'user', 'content': f'{prompt}'}],model='gpt-4o' ,json_format=True)
                     title = eval(result).get('title')
+                    if web_id == 'voux' and '預約試穿' in title:
+                        raise
                     break
                 except:
                     if k == 10:
