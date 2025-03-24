@@ -5,17 +5,19 @@ from tqdm import tqdm
 import requests
 from utils.log import logger
 from AI_customer_service import QA_api
-from langchain.output_parsers import RetryWithErrorOutputParser
 from opencc import OpenCC
-from langchain.output_parsers import PydanticOutputParser
-from langchain.schema import SystemMessage
-from langchain.output_parsers import StructuredOutputParser, ResponseSchema
-from langchain.prompts import PromptTemplate, ChatPromptTemplate, HumanMessagePromptTemplate
 from langchain.chains import LLMChain
-from langchain_openai import AzureChatOpenAI
 import json
 import os
+import google.generativeai as genai
 import random
+import json
+from dotenv import load_dotenv
+load_dotenv()
+
+API_KEY = os.getenv('GOOGLE_API_KEY')
+genai.configure(api_key=API_KEY)
+
 
 class Util(QA_api):
     def __init__(self):
@@ -23,14 +25,10 @@ class Util(QA_api):
         self.base_web_id = 'nineyi000360'
         self.base_web_id_type = 1
         self.get_web_id()
+        self.title_model_setting()
         self.dateint = self.get_data_intdate(7)
         self.azure_openai_setting()
-        self.langchain_model_setting()
         self.api_version = self.ChatGPT.AZURE_OPENAI_CONFIG.get('api_version')
-        self.chat_check_model = AzureChatOpenAI(azure_deployment="chat-cs-canada-4", temperature=0, openai_api_version=self.api_version)
-        self.article_model = AzureChatOpenAI(temperature=0.2, azure_deployment='chat-cs-canada-35', openai_api_version=self.api_version)
-        self.article_model_16k = AzureChatOpenAI(temperature=0.2, azure_deployment='chat-cs-canada-35-16k', openai_api_version=self.api_version)
-        self.article_4_model = AzureChatOpenAI(temperature=0.2, azure_deployment='chat-cs-canada-4', openai_api_version=self.api_version)
 
     def get_data_intdate(self, time_delay):
         return int(str(datetime.date.today() - datetime.timedelta(time_delay)).replace('-', ''))
@@ -73,23 +71,7 @@ class Util(QA_api):
         data = DBhelper('dione', is_ssh=True).ExecuteSelect(query)
         return pd.DataFrame(data).drop_duplicates(['keyword', 'title'])
 
-    def langchain_model_setting(self):
-        self.check_model_setting()
-        self.title_model_setting()
 
-    def check_model_setting(self):
-        response_schemas = [ResponseSchema(name="check", description="判斷是否符合大眾觀賞"), ]
-        output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-        format_instructions = output_parser.get_format_instructions()
-        self.check_prompt = ChatPromptTemplate(
-            messages=[SystemMessage(
-                content=("你會判斷內容是否符合大眾觀賞,返回True或者False")),
-                HumanMessagePromptTemplate.from_template(
-                    "answer the users content as best as possible.\n{format_instructions}\n{question}")
-            ],
-            input_variables=["question"],
-            partial_variables={"format_instructions": format_instructions}
-        )
 
     def title_model_setting(self):
         self.title_1_prompt = """
@@ -155,50 +137,6 @@ class Util(QA_api):
         cc = OpenCC('likr-s2twp')
         return cc.convert(text)
 
-    def get_article(self, prompt, title, sub_list):
-        if not sub_list:
-            response_schemas = [ResponseSchema(name=f"Articles", description=f"Articles")]
-            model = self.article_4_model
-        else:
-            response_schemas = [ResponseSchema(name=f"paragraph_{i + 1}", description=f"Articles with subtitle '{v}'")
-                                for i, v in enumerate(sub_list)]
-            model = self.article_model
-        output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
-        format_instructions = output_parser.get_format_instructions()
-        _input = ChatPromptTemplate(
-            messages=[HumanMessagePromptTemplate.from_template("{question}\n{format_instructions}\n")],
-            input_variables=["question"], partial_variables={"format_instructions": format_instructions}).format_prompt(
-            question=prompt)
-        output = model(_input.to_messages())
-        # noinspection PyBroadException
-        try:
-            gpt_res = output_parser.parse(output.content)
-            if not sub_list:
-                res = [gpt_res['Articles'].replace('文章標題：', '').replace('文章標題:', '').replace('文章內容：', '').replace('文章內容:', '')]
-            else:
-                res = [v.replace(f'{i}。', '').replace(f'{i}', '') for i, v in zip(sub_list, gpt_res.values())]
-            for i in res:
-                if not i:
-                    raise
-        except:
-            k = 0
-            while True:
-                print('產生失敗！！,重新產生')
-                if k > 5:
-                    print("產生超失敗")
-                    return []
-                retry_parser = RetryWithErrorOutputParser.from_llm(parser=output_parser, llm=self.article_model_16k)
-                gpt_res = retry_parser.parse_with_prompt(output.content, _input)
-                if not sub_list:
-                    res = [gpt_res['Articles'].replace('文章標題：', '').replace('文章標題:', '').replace('文章內容：', '').replace('文章內容:', '')]
-                else:
-                    res = [v.replace(f'{i}。', '').replace(f'{i}', '') for i, v in zip(sub_list, gpt_res.values())]
-                for i in res:
-                    if not i:
-                        k += 1
-                        continue
-                break
-        return res
 
     def get_generate_articles_prompt(self, title, sub_list, keyword_info_dict, ta_setting, eng=False):
         if not ta_setting:
@@ -369,16 +307,6 @@ class AiTraffic(Util):
         json_data = json.loads(json_string)
         return json_data.get("Sensitive_keyword")
 
-
-
-
-    def check_news(self, text):
-        _input = self.check_prompt.format_prompt(question=text)
-        output = self.chat_check_model(_input.to_messages())
-        if 'False' in output.content:
-            return False
-        return True
-
     def check_keyword(self, keywords, web_id):
         print('檢查關鍵字是否包含')
         if web_id not in self.web_id_dict:
@@ -393,7 +321,7 @@ class AiTraffic(Util):
         return False
 
     def get_title(self, web_id: str = 'test', user_id: str = '', keywords: str = '', web_id_main: str = '',
-                  article: str = None, types: int = 1, eng: bool = False):
+                  article: str = None, types: int = 1, eng: bool = False, mode='openai'):
         print(f"""輸入web_id:{web_id}""")
         # check_keyword = self.check_keyword(keywords, web_id_main) if web_id_main else self.check_keyword(keywords, web_id)
         # if not check_keyword:
@@ -406,12 +334,22 @@ class AiTraffic(Util):
             k = 0
             while True:
                 try:
-
-                    result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sys_prompt},
-                                                  {'role': 'user', 'content': f'{prompt}'}],model='gpt-4o' ,json_format=True)
-                    title = eval(result).get('title')
-                    if web_id == 'voux' and '預約試穿' in title:
-                        raise
+                    if mode == 'openai' and web_id != 'salesdemo':
+                        result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sys_prompt},
+                                                      {'role': 'user', 'content': f'{prompt}'}],json_format=True)
+                        title = eval(result).get('title')
+                        if web_id == 'voux' and '預約試穿' in title:
+                            raise
+                    else:
+                        print('gemini')
+                        gen_model = genai.GenerativeModel(
+                            model_name="gemini-1.5-flash",
+                            generation_config={"response_mime_type": "application/json"},
+                            system_instruction=sys_prompt,
+                        )
+                        response = gen_model.generate_content(prompt)
+                        title_data = json.loads(response.text)
+                        title = title_data.get('title')
                     break
                 except:
                     if k == 10:
@@ -459,7 +397,7 @@ class AiTraffic(Util):
                                           db='sunscribe', table='ai_article', chunk_size=100000, is_ssh=False)
             return list(title.values())
 
-    def get_sub_title(self, title: str = '', user_id: str = '', web_id: str = 'test', types: int = 1, eng: bool = False):
+    def get_sub_title(self, title: str = '', user_id: str = '', web_id: str = 'test', types: int = 1, eng: bool = False,mode='openai'):
         print(f"""獲取副標題,標題為:{title}""")
         k = 0
         sub_title_prompt = self.sub_title_prompt + "\nPlease respond in language entered. The JSON output should follow this format" if eng else self.sub_title_prompt + "\nPlease respond in traditional Chinese. The JSON output should follow this format"
@@ -470,6 +408,23 @@ class AiTraffic(Util):
                 sub_title_dict = eval(result)
                 if not sub_title_dict.get('sub_title_1'):
                     raise
+                if mode == 'openai' and web_id != 'salesdemo':
+                    result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sub_title_prompt},
+                                                           {'role': 'user', 'content': f'{title}'}], json_format=True)
+                    sub_title_dict = eval(result)
+                    if not sub_title_dict.get('sub_title_1'):
+                        raise
+                else:
+                    print('gemini')
+                    gen_model = genai.GenerativeModel(
+                        model_name="gemini-1.5-flash",
+                        generation_config={"response_mime_type": "application/json"},
+                        system_instruction=sub_title_prompt,
+                    )
+                    response = gen_model.generate_content(title)
+                    sub_title_dict = json.loads(response.text)
+                    if not sub_title_dict.get('sub_title_1'):
+                        raise
                 break
             except:
                 if k == 10:
@@ -487,7 +442,7 @@ class AiTraffic(Util):
         return {a+1: b for a, b in enumerate(sub_title_dict.values())}
 
     def generate_articles(self, title: str = '', subtitle_list: list = [], keywords: str = '', user_id: str = '',
-                          web_id: str = 'test', types: int = 1, ta: list = [], eng: bool = False):
+                          web_id: str = 'test', types: int = 1, ta: list = [], eng: bool = False, mode='openai'):
         query = f"SELECT keyword_dict  FROM web_push.ai_article WHERE web_id = '{web_id}' and user_id  ='{user_id}'"
         keyword_info_db = DBhelper('sunscribe').ExecuteSelect(query)
         sub_list = [i for i in subtitle_list if i]
@@ -499,7 +454,31 @@ class AiTraffic(Util):
             print('db無keyword_info,可能有問題')
             keyword_info_dict = self.get_keyword_info(web_id, keywords)
         prompt = self.get_generate_articles_prompt(title, sub_list, keyword_info_dict, ta, eng)
-        res = self.get_article(prompt, title, sub_list)
+        sys_prompt = """The structure of the article should be output in the following JSON format, with each paragraph separated accordingly:
+                                        json
+                                        {"""
+        for i, s in enumerate(sub_list):
+            sys_prompt += f""" "Subtitles{str(i + 1)}": The content of {s},"""
+        sys_prompt += f"""{"}"}Please note that the content of each Subtitles section should not include the current subtitle itself. For example, in "Subtitles1", the subtitle "{sub_list[0]}" should not appear, but the paragraph content should begin directly.
+                                        Ensure that each section of the article is closely related to its corresponding subtitle, and provide practical advice in a relaxed tone to help readers easily handle situations involving carrying an umbrella while traveling. The generated paragraphs must match the number I provide and must not be fewer."""
+
+        if mode == 'openai' and web_id != 'salesdemo':
+            print('openai')
+            result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sys_prompt},
+                                                   {'role': 'user', 'content': prompt}], json_format=True)
+            article_data = eval(result)
+            res = [article_data.get(f"Subtitles{str(i + 1)}") for i in range(len(sub_list))]
+        else:
+            print('gemini')
+            gen_model = genai.GenerativeModel(
+                model_name="gemini-1.5-flash",
+                generation_config={"response_mime_type": "application/json"},
+                system_instruction=sys_prompt
+            )
+            response = gen_model.generate_content(prompt)
+            article_data = json.loads(response.text)
+            res = [article_data.get(f"Subtitles{str(i + 1)}") for i in range(len(sub_list))]
+
         print(f"""產生的文章內容:\n{res}""")
         return res
 

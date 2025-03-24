@@ -28,7 +28,7 @@ class ChatGPT_AVD:
         self.openai_client = self.set_openai_client()
 
     def get_keys(func):
-        def inner(self, message, model="gpt-3.5-turbo", timeout=60, debug=False, json_format=False, azure=True, temperature=None):
+        def inner(self, message, model="gpt-4o-mini", timeout=60, debug=False, json_format=False, azure=True, temperature=None):
             if azure:
                 if model == "gpt-4":
                     model_name = 'chat-cs-canada-4'
@@ -43,7 +43,7 @@ class ChatGPT_AVD:
                 elif model == 'gpt-4-pre':
                     model_name = "chat-cs-canada-4-Preview"
                 else:
-                    model_name = "chat-cs-canada-35"
+                    model_name = "chat-cs-canada-4o-mini"
                 if debug:
                     res = func_timeout(timeout, func, (self, message, model_name, json_format, azure, temperature))
                 else:
