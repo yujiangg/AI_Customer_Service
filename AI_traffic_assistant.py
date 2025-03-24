@@ -436,6 +436,22 @@ class AiTraffic(Util):
                                       chunk_size=100000, is_ssh=False)
         return {a+1: b for a, b in enumerate(sub_title_dict.values())}
 
+    def dfs(self, j):
+        if isinstance(j, dict):
+            if 'Subtitles1' in j:
+                return j
+            else:
+                for i in j.values():
+                    k = self.dfs(i)
+                    if k:
+                        return k
+                    else:
+                        continue
+            return None
+
+        else:
+            return None
+
     def generate_articles(self, title: str = '', subtitle_list: list = [], keywords: str = '', user_id: str = '',
                           web_id: str = 'test', types: int = 1, ta: list = [], eng: bool = False, mode='openai'):
         query = f"SELECT keyword_dict  FROM web_push.ai_article WHERE web_id = '{web_id}' and user_id  ='{user_id}'"
@@ -461,7 +477,11 @@ class AiTraffic(Util):
             print('openai')
             result = self.ChatGPT.ask_gpt(message=[{'role': 'system', 'content': sys_prompt},
                                                    {'role': 'user', 'content': prompt}], json_format=True)
+            print(result)
             article_data = eval(result)
+
+            article_data = self.dfs(article_data)
+
             res = [article_data.get(f"Subtitles{str(i + 1)}") for i in range(len(sub_list))]
         else:
             print('gemini')
@@ -472,6 +492,7 @@ class AiTraffic(Util):
             )
             response = gen_model.generate_content(prompt)
             article_data = json.loads(response.text)
+            article_data = self.dfs(article_data)
             res = [article_data.get(f"Subtitles{str(i + 1)}") for i in range(len(sub_list))]
 
         print(f"""產生的文章內容:\n{res}""")
