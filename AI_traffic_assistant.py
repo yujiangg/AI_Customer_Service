@@ -457,6 +457,8 @@ class AiTraffic(Util):
         query = f"SELECT keyword_dict  FROM web_push.ai_article WHERE web_id = '{web_id}' and user_id  ='{user_id}'"
         keyword_info_db = DBhelper('sunscribe').ExecuteSelect(query)
         sub_list = [i for i in subtitle_list if i]
+        if not sub_list:
+            sub_list = [title]
         if keyword_info_db:
             print('db有keyword_info')
             keyword_info_dict = {i['keyword']: (i['title'], i['web_id'], i['url']) for i in

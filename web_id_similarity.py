@@ -8,7 +8,7 @@ def web_id_similarity():
     query = f"""SELECT DISTINCT web_id,tag from all_website_category_tag_2"""
     tag_web_id = DBhelper('sunscribe').ExecuteSelect(query=query)
     query = f"""SELECT DISTINCT web_id FROM dione.pageview_record_day x WHERE `date` >= {date}"""
-    web_id_online = {i[0] for i in  DBhelper('dione').ExecuteSelect(query=query)}
+    web_id_online = {i[0] for i in  DBhelper('dione', is_ssh=True).ExecuteSelect(query=query)}
 
 
     tag_dict = collections.defaultdict(set)
